@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>xchess</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin-top: 20px; }
+    button { margin: 5px; padding: 10px 20px; }
+    input { padding: 8px; margin: 5px; }
+    #board { width: 400px; margin: 20px auto; }
+  </style>
+  <!-- Include chessboard.js CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard.min.css" />
+</head>
+<body>
+  <h1>Welcome to xchess</h1>
+  <div id="controls">
+    <button id="joinPublic">Join Public Game</button>
+    <br><br>
+    <button id="createPrivate">Create Private Game</button>
+    <input type="text" id="privateCode" placeholder="Enter 3-digit code">
+    <button id="joinPrivate">Join Private Game</button>
+  </div>
+  
+  <div id="status"></div>
+  <div id="board" style="display: none;"></div>
+  
+  <!-- Include Socket.io client -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Include chess.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.min.js"></script>
+  <!-- Include chessboard.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard.min.js"></script>
+  
+  <script>
+    const socket = io();
+    const statusDiv = document.getElementById('status');
+    const boardDiv = document.getElementById('board');
+    let board = null;
+    let game = null;
+    let room = null;
+    let playerColor = null; // 'white' or 'black'
+
+    // Helper function to update status messages
+    function setStatus(message) {
+      statusDiv.innerText = message;
+    }
+
+    // Join public game
+    document.getElementById('joinPublic').addEventListener('click', () => {
+      socket.emit('joinPublic');
+      setStatus('Joining public game...');
+    });
+
+    // Create private game
+    document.getElementById('createPrivate').addEventListener('click', () => {
+      socket.emit('createPrivate');
+      setStatus('Creating private game...');
+    });
+
+    // Join private game
+    document.getElementById('joinPrivate').addEventListener('click', () => {
+      const code = document.getElementById('privateCode').value;
+      socket.emit('joinPrivate', code);
+      setStatus('Joining private game...');
+    });
+
+    // Waiting message from server
+    socket.on('waiting', (message) => {
+      setStatus(message);
+    });
+
+    // Private game created response
+    socket.on('privateCreated', (data) => {
+      setStatus('Private game created. Share this code: ' + data.code);
+    });
+
+    // When game is ready to start
+    socket.on('startGame', (data) => {
+      room = data.room;
+      // Determine player's color based on server assignment
+      if (socket.id === data.white) {
+        playerColor = 'white';
+      } else {
+        playerColor = 'black';
+      }
+      setStatus('Game started. You are playing as ' + playerColor + '. Room: ' + room);
+      document.getElementById('controls').style.display = 'none';
+      boardDiv.style.display = 'block';
+
+      // Initialize chess game and board UI
+      game = new Chess();
+      board = Chessboard('board', {
+        draggable: true,
+        position: 'start',
+        orientation: playerColor,
+        onDrop: onDrop
+      });
+    });
+
+    // Function triggered when a piece is dropped on the board
+    function onDrop(source, target) {
+      // Attempt to make the move on the game instance
+      const move = game.move({
+        from: source,
+        to: target,
+        promotion: 'q' // Always promote to queen for simplicity
+      });
+
+      // Illegal move: snap the piece back to its original square
+      if (move === null) return 'snapback';
+
+      // Update board to reflect the move
+      board.position(game.fen());
+
+      // Send the move to the server so the opponent can update their board
+      socket.emit('move', {
+        room: room,
+        from: move.from,
+        to: move.to,
+        promotion: move.promotion
+      });
+    }
+
+    // Listen for moves from the opponent
+    socket.on('move', (data) => {
+      const move = game.move({
+        from: data.from,
+        to: data.to,
+        promotion: data.promotion
+      });
+      if (move !== null) {
+        board.position(game.fen());
+      }
+    });
+
+    // Display error messages from the server
+    socket.on('errorMessage', (message) => {
+      setStatus('Error: ' + message);
+    });
+  </script>
+</body>
+</html>
